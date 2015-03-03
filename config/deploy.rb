@@ -1,89 +1,84 @@
-# config valid only for current version of Capistrano
-lock '3.3.5'
+require 'mina/bundler'
+require 'mina/rails'
+require 'mina/git'
+# require 'mina/rbenv'  # for rbenv support. (http://rbenv.org)
+# require 'mina/rvm'    # for rvm support. (http://rvm.io)
 
-require "rvm/capistrano"
+# Basic settings:
+#   domain       - The hostname to SSH to.
+#   deploy_to    - Path to deploy into.
+#   repository   - Git repo to clone from. (needed by mina/git)
+#   branch       - Branch name to deploy. (needed by mina/git)
 
-set :application, 'mycalendar'
-set :repo_url, 'git@github.com:duyphan/mycalendar.git'
-# set :rbenv_ruby, '2.1.2'
-# 
-# set :pty, true
+set :user, 'deployer'
+set :domain, '128.199.71.122'
+set :deploy_to, '/var/www/mycalendar'
+set :repository, 'git@github.com:duyphan/mina-calendar.git'
+set :branch, 'master'
 
-set :rvm_ruby_string, :local 
-set :rvm_autolibs_flag, "read-only"
+# For system-wide RVM install.
+#   set :rvm_path, '/usr/local/rvm/bin/rvm'
 
-# set :default_env, {
-#   rvm_bin_path: '/usr/local/rvm/bin',
-#   path: '/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin',
-# }
+# Manually create these paths in shared/ (eg: shared/config/database.yml) in your server.
+# They will be linked in the 'deploy:link_shared_paths' step.
+set :shared_paths, ['config/database.yml', 'log']
 
-# set :rails_env,       "production"
-# # set :deploy_to,       "/home/deployer/apps/my_site"
+# Optional settings:
+#   set :user, 'foobar'    # Username in the server to SSH to.
+#   set :port, '30000'     # SSH port number.
+#   set :forward_agent, true     # SSH forward_agent.
 
-# # default_environment["RAILS_ENV"] = 'production'
+# This task is the environment that is loaded for most commands, such as
+# `mina deploy` or `mina rake`.
+task :environment do
+  # If you're using rbenv, use this to load the rbenv environment.
+  # Be sure to commit your .ruby-version or .rbenv-version to your repository.
+  # invoke :'rbenv:load'
 
-# set :user,            "deployer"
-# set :group,           "deployer"
-# set :use_sudo,        false
-
-# Default branch is :master
-# ask :branch, proc { `git rev-parse --abbrev-ref HEAD`.chomp }.call
-
-# Default deploy_to directory is /var/www/my_app_name
-# set :deploy_to, '/var/www/my_app_name'
-
-# Default value for :scm is :git
-# set :scm, :git
-
-# Default value for :format is :pretty
-# set :format, :pretty
-
-# Default value for :log_level is :debug
-# set :log_level, :debug
-
-# Default value for :pty is false
-# set :pty, true
-
-# Default value for :linked_files is []
-# set :linked_files, fetch(:linked_files, []).push('config/database.yml')
-
-# Default value for linked_dirs is []
-# set :linked_dirs, fetch(:linked_dirs, []).push('bin', 'log', 'tmp/pids', 'tmp/cache', 'tmp/sockets', 'vendor/bundle', 'public/system')
-
-# Default value for default_env is {}
-# set :default_env, { path: "/opt/ruby/bin:$PATH" }
-
-# Default value for keep_releases is 5
-# set :keep_releases, 5
-
-# before 'deploy:setup', 'rvm:install_rvm'  # install/update RVM
-# before 'deploy:setup', 'rvm:install_ruby' # install Ruby and create gemset
-
-namespace :deploy do
-
-	task :setup do
-    on roles(:app), in: :sequence, wait: 5 do
-      execute "rvm:install_rvm"
-      execute "rvm:install_ruby"
-    end
-  end
-
-	desc 'Restart application'
-  task :restart do
-    on roles(:app), in: :sequence, wait: 5 do
-      execute "sudo service mycalendar restart"  ## -> line you should add
-    end
-  end
-
-  after :publishing, :restart
-
-  after :restart, :clear_cache do
-    on roles(:web), in: :groups, limit: 3, wait: 10 do
-      # Here we can do anything such as:
-      # within release_path do
-      #   execute :rake, 'cache:clear'
-      # end
-    end
-  end
-
+  # For those using RVM, use this to load an RVM version@gemset.
+  # invoke :'rvm:use[ruby-1.9.3-p125@default]'
 end
+
+# Put any custom mkdir's in here for when `mina setup` is ran.
+# For Rails apps, we'll make some of the shared paths that are shared between
+# all releases.
+task :setup => :environment do
+  queue! %[mkdir -p "#{deploy_to}/#{shared_path}/log"]
+  queue! %[chmod g+rx,u+rwx "#{deploy_to}/#{shared_path}/log"]
+
+  queue! %[mkdir -p "#{deploy_to}/#{shared_path}/config"]
+  queue! %[chmod g+rx,u+rwx "#{deploy_to}/#{shared_path}/config"]
+
+  queue! %[touch "#{deploy_to}/#{shared_path}/config/database.yml"]
+  queue  %[echo "-----> Be sure to edit '#{deploy_to}/#{shared_path}/config/database.yml'."]
+end
+
+desc "Deploys the current version to the server."
+task :deploy => :environment do
+  deploy do
+    # Put things that will set up an empty directory into a fully set-up
+    # instance of your project.
+    invoke :'git:clone'
+    invoke :'deploy:link_shared_paths'
+    invoke :'bundle:install'
+    invoke :'rails:db_migrate'
+    invoke :'rails:assets_precompile'
+    invoke :'deploy:cleanup'
+
+    to :launch do
+      queue "mkdir -p #{deploy_to}/#{current_path}/tmp/"
+      queue "touch #{deploy_to}/#{current_path}/tmp/restart.txt"
+    end
+  end
+end
+
+task :restart do
+  queue 'sudo service mycalendar restart'
+end
+
+# For help in making your deploy script, see the Mina documentation:
+#
+#  - http://nadarei.co/mina
+#  - http://nadarei.co/mina/tasks
+#  - http://nadarei.co/mina/settings
+#  - http://nadarei.co/mina/helpers
